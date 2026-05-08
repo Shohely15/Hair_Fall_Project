@@ -4,85 +4,53 @@ import pickle
 import numpy as np
 import os
 
-# Set page config
 st.set_page_config(page_title="Hair Fall Prediction", layout="wide")
 
 # ============================================
-# LOAD MODEL ARTIFACTS - CORRECT WAY
+# LOAD MODEL ARTIFACTS
 # ============================================
 @st.cache_resource
 def load_artifacts():
-    """Load all model artifacts safely"""
     try:
         # Check if files exist
         required_files = ['model.pkl', 'scaler.pkl', 'label_encoders.pkl', 'feature_names.pkl']
-        missing_files = []
+        missing = [f for f in required_files if not os.path.exists(f)]
         
-        for file in required_files:
-            if not os.path.exists(file):
-                missing_files.append(file)
+        if missing:
+            st.error(f"Missing files: {missing}")
+            st.info("Please make sure all model files are uploaded")
+            st.stop()
         
-        if missing_files:
-            st.error(f"❌ Missing files: {missing_files}")
-            st.info("Please upload all required model files")
-            return None, None, None, None
-        
-        # Load model
-        with open('model.pkl', 'rb') as f:
-            model = pickle.load(f)
-        
-        # Load scaler
-        with open('scaler.pkl', 'rb') as f:
-            scaler = pickle.load(f)
-        
-        # Load label encoders
-        with open('label_encoders.pkl', 'rb') as f:
-            label_encoders = pickle.load(f)
-        
-        # Load feature names
-        with open('feature_names.pkl', 'rb') as f:
-            feature_names = pickle.load(f)
+        model = pickle.load(open('model.pkl', 'rb'))
+        scaler = pickle.load(open('scaler.pkl', 'rb'))
+        label_encoders = pickle.load(open('label_encoders.pkl', 'rb'))
+        feature_names = pickle.load(open('feature_names.pkl', 'rb'))
         
         return model, scaler, label_encoders, feature_names
-        
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
-        return None, None, None, None
+        st.stop()
 
-# Load artifacts
 model, scaler, label_encoders, feature_names = load_artifacts()
-
-# Check if loading was successful
-if model is None:
-    st.stop()
 
 # ============================================
 # UI TITLE
 # ============================================
 st.title("🧑‍🦲 Hair Fall Severity Prediction System")
 st.markdown("---")
-st.success(f"✅ Model loaded successfully with **{len(feature_names)}** features")
-
-# Display feature names in expander
-with st.expander("📋 Model Features"):
-    st.write(f"Total features: {len(feature_names)}")
-    for i, f in enumerate(feature_names, 1):
-        st.write(f"{i}. {f}")
-
-st.markdown("---")
+st.info(f"✅ Model loaded successfully with **{len(feature_names)}** features")
 
 # ============================================
 # CREATE INPUT FORM
 # ============================================
 st.subheader("📋 Fill Your Information")
 
-# Create two columns for layout
-col1, col2 = st.columns(2)
-
-# Dictionary to store inputs
 input_data = {}
 
-# Define common options for features
+# Split features into two columns
+col1, col2 = st.columns(2)
+
+# Define default options for common features
 feature_options = {
     'Age': ['18-20', '21-25', '26-30', '31-35', '36-40', '40+'],
     'Gender': ['Male', 'Female', 'Other'],
@@ -98,10 +66,10 @@ feature_options = {
 
 # Create input fields for each feature
 for i, feature in enumerate(feature_names):
-    # Alternate between columns
-    current_col = col1 if i % 2 == 0 else col2
+    # Choose column
+    current_col = col1 if i < len(feature_names)//2 else col2
     
-    # For binary features (scalp conditions)
+    # For binary/scalp features
     if feature in ['Dandruff', 'Oily_Scalp', 'Itching']:
         input_data[feature] = 1 if current_col.checkbox(feature.replace('_', ' ')) else 0
     
@@ -109,29 +77,13 @@ for i, feature in enumerate(feature_names):
     elif feature in feature_options:
         input_data[feature] = current_col.selectbox(feature, feature_options[feature])
     
-    # For features with custom detection
+    # For numeric features
+    elif feature in ['Hair Fall Severity']:
+        input_data[feature] = current_col.slider(feature, 0, 3, 1)
+    
+    # Default text input
     else:
-        # Try to detect by keyword
-        feature_lower = feature.lower()
-        
-        if 'age' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Age'])
-        elif 'gender' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Gender'])
-        elif 'diet' in feature_lower and 'quality' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Diet Quality'])
-        elif 'exercise' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Exercise Frequency'])
-        elif 'sleep' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Sleep Duration'])
-        elif 'stress' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Stress Level'])
-        elif 'smoking' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Smoking Habit'])
-        elif 'protein' in feature_lower:
-            input_data[feature] = current_col.selectbox(feature, feature_options['Dietary Protein Intake'])
-        else:
-            input_data[feature] = current_col.text_input(feature, "Normal")
+        input_data[feature] = current_col.text_input(feature, "Normal")
 
 # ============================================
 # PREDICTION BUTTON
@@ -141,26 +93,15 @@ if st.button("🔮 Predict Hair Fall Severity", type="primary"):
         # Convert to DataFrame
         input_df = pd.DataFrame([input_data])
         
-        st.write("**Debug - Input Data:**")
-        st.json(input_data)
-        
         # Encode categorical columns
         for col in input_df.columns:
             if col in label_encoders:
                 try:
-                    # Get the encoder
-                    encoder = label_encoders[col]
-                    value = input_df[col].iloc[0]
-                    
-                    # Check if value exists in encoder classes
-                    if value in encoder.classes_:
-                        input_df[col] = encoder.transform([value])[0]
+                    if input_df[col].iloc[0] in label_encoders[col].classes_:
+                        input_df[col] = label_encoders[col].transform(input_df[col])
                     else:
-                        # Use the first class as default
-                        st.warning(f"Value '{value}' not seen in training, using default")
-                        input_df[col] = 0
-                except Exception as e:
-                    st.warning(f"Encoding error for {col}: {str(e)}")
+                        input_df[col] = label_encoders[col].transform([label_encoders[col].classes_[0]])[0]
+                except:
                     input_df[col] = 0
         
         # Convert boolean to int
@@ -168,7 +109,7 @@ if st.button("🔮 Predict Hair Fall Severity", type="primary"):
             if input_df[col].dtype == bool:
                 input_df[col] = input_df[col].astype(int)
         
-        # Ensure all features are in correct order
+        # Ensure correct feature order
         input_df = input_df[feature_names]
         
         # Scale features
@@ -177,8 +118,12 @@ if st.button("🔮 Predict Hair Fall Severity", type="primary"):
         # Predict
         prediction = model.predict(input_scaled)[0]
         
-        # Get prediction probabilities
-        probabilities = model.predict_proba(input_scaled)[0]
+        # Get probability
+        try:
+            proba = model.predict_proba(input_scaled)[0]
+            confidence = max(proba) * 100
+        except:
+            confidence = None
         
         # ============================================
         # DISPLAY RESULT
@@ -186,40 +131,49 @@ if st.button("🔮 Predict Hair Fall Severity", type="primary"):
         st.markdown("---")
         st.subheader("📊 Prediction Result")
         
-        # Severity mapping
         severity_map = {0: "Low", 1: "Mild", 2: "Moderate", 3: "Severe"}
         severity = severity_map.get(prediction, "Unknown")
         
         # Display based on severity
         if prediction >= 2:
             st.error(f"⚠️ **High Hair Fall Severity: {severity}**")
-            st.warning("**Recommendations:**\n- Consult a dermatologist\n- Improve diet with more protein\n- Reduce stress\n- Get adequate sleep (7-8 hours)")
+            with st.expander("📝 Recommendations"):
+                st.write("""
+                - 👨‍⚕️ **Consult a dermatologist immediately**
+                - 🥗 **Improve diet with more protein and iron**
+                - 😴 **Ensure 7-8 hours of quality sleep**
+                - 🧘 **Reduce stress through meditation/exercise**
+                - 💆 **Use mild, sulfate-free hair products**
+                """)
         elif prediction == 1:
             st.warning(f"📈 **Mild Hair Fall Severity: {severity}**")
-            st.info("**Recommendations:**\n- Increase protein intake\n- Regular exercise\n- Proper hair care routine")
+            with st.expander("📝 Recommendations"):
+                st.write("""
+                - 🥚 **Increase protein intake (eggs, fish, nuts)**
+                - 🏃 **Regular exercise (30 mins daily)**
+                - 💤 **Maintain consistent sleep schedule**
+                - 🧴 **Use hair strengthening products**
+                """)
         else:
             st.success(f"✅ **Low Hair Fall Severity: {severity}**")
-            st.info("**Recommendations:**\n- Maintain current healthy habits\n- Continue regular hair care")
+            with st.expander("📝 Recommendations"):
+                st.write("""
+                - 🌟 **Maintain current healthy habits**
+                - 🥬 **Continue balanced diet**
+                - 💧 **Stay hydrated**
+                - 🧴 **Regular hair care routine**
+                """)
         
-        # Show confidence scores
-        st.write("**Confidence Levels:**")
-        for i, prob in enumerate(probabilities):
-            severity_level = severity_map.get(i, f"Level {i}")
-            st.progress(float(prob), text=f"{severity_level}: {prob:.1%}")
+        # Show confidence
+        if confidence:
+            st.write(f"**Confidence: {confidence:.1f}%**")
+            st.progress(confidence/100)
         
+        # Show all inputs
+        with st.expander("📋 Your Input Data"):
+            st.json(input_data)
+            
     except Exception as e:
         st.error(f"Prediction error: {str(e)}")
-        st.write("**Debug Info:**")
-        st.write(f"Expected features: {feature_names}")
-        st.write(f"Provided features: {list(input_data.keys())}")
-        
-        # Show the actual input data types
-        st.write("**Input data types:**")
-        for key, value in input_data.items():
-            st.write(f"{key}: {type(value)} = {value}")
-
-# ============================================
-# FOOTER
-# ============================================
-st.markdown("---")
-st.markdown("💡 **Note:** This prediction is based on machine learning model and should not replace professional medical advice.")
+        st.write("Expected features:", feature_names)
+        st.write("Provided features:", list(input_data.keys()))
